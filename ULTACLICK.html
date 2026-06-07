@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>ULTA CLICK</title>
+  <style>
+    body {
+      margin: 0; padding: 0; background-color: #1a1a2e; color: #fff;
+      font-family: sans-serif; overflow: hidden; user-select: none;
+    }
+    .hidden { display: none !important; }
+    
+    .screen {
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background-color: #1a1a2e; z-index: 100;
+    }
+    h1 { font-size: 40px; color: #00ffff; margin-bottom: 30px; }
+    .btn {
+      width: 200px; padding: 15px; margin: 10px; font-size: 18px; font-weight: bold;
+      color: white; background: #4facfe; border: none; border-radius: 25px; cursor: pointer;
+    }
+    .btn-orange { background: #ff9f43; }
+    .btn-red { background: #ff4757; }
+
+    /* แถบสถานะด้านบน */
+    #hud {
+      position: absolute; top: 15px; left: 20px; right: 20px;
+      display: flex; justify-content: space-between; font-size: 24px; z-index: 10; pointer-events: none;
+    }
+    #hud div, #hud button { pointer-events: auto; }
+    #pause-btn { background: #333; color: #fff; border: 1px solid #555; padding: 5px 10px; cursor: pointer; }
+
+    /* พื้นที่สำหรับเล่นเกมและตัวเป้า */
+    #game-container { position: relative; width: 100vw; height: 100vh; cursor: crosshair; }
+    .target { position: absolute; border-radius: 50%; cursor: pointer; animation: floatUp 2s linear forwards; }
+    .target-red { width: 60px; height: 60px; background: radial-gradient(circle, #ff4757, #ff6b81); }
+    .target-gold { width: 45px; height: 45px; background: radial-gradient(circle, #ffa502, #eccc68); }
+
+    @keyframes floatUp {
+      0% { transform: translateY(105vh); }
+      100% { transform: translateY(-10vh); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 1. หน้าเมนูหลัก -->
+  <div id="menu-screen" class="screen">
+    <h1>ULTA CLICK</h1>
+    <button class="btn" onclick="startEndless()">โหมดไม่มีเวลา</button>
+    <button class="btn btn-orange" onclick="showTimeMenu()">โหมดจับเวลา</button>
+  </div>
+
+  <!-- 2. หน้าเลือกเวลา -->
+  <div id="time-screen" class="screen hidden">
+    <h1>SELECT TIME</h1>
+    <button class="btn" onclick="startTimer(1)">1 นาที</button>
+    <button class="btn" onclick="startTimer(5)">5 นาที</button>
+    <button class="btn" onclick="startTimer(10)">10 นาที</button>
+    <button class="btn" onclick="startTimer(20)">20 นาที</button>
+    <button class="btn btn-red" onclick="backToMenu()">ย้อนกลับ</button>
+  </div>
+
+  <!-- 3. หน้าจอหยุดเกมชั่วคราว -->
+  <div id="pause-screen" class="screen hidden" style="z-index: 200; background: rgba(26,26,46,0.95);">
+    <h1>PAUSED</h1>
+    <button class="btn" onclick="resumeGame()">เล่นต่อ</button>
+    <button class="btn btn-red" onclick="exitGame()">ออก</button>
+  </div>
+
+  <!-- 4. หน้าจอเมื่อหมดเวลา -->
+  <div id="gameover-screen" class="screen hidden" style="z-index: 200;">
+    <h1>TIME UP!</h1>
+    <h2 id="final-score">คะแนนของคุณ: 0</h2>
+    <button class="btn btn-red" onclick="exitGame()">ออก</button>
+    <button class="btn btn-red" onclick="exitGame()">ออก</button>
+  </div>
+
+  <!-- 5. ส่วนของหน้าจอตอนเล่นเกม -->
+  <div id="game-view" class="hidden">
+    <div id="hud">
+      <div>คะแนน: <span id="score-txt">0</span> | COMBO: <span id="combo-txt">0</span> <span id="x2-txt" style="color:#ff007f; display:none; font-weight:bold;">X2!</span></div>
+      <div id="timer-box" class="hidden">เวลาเหลือ: <span id="timer-txt">00:00</span></div>
+      <button id="pause-btn" onclick="pauseGame()">หยุดเกม</button>
+    </div>
+    <div id="game-container" onclick="clickMiss(event)"></div>
+  </div>
+
+  <script>
+    let score = 0, combo = 0, timeLeft = 0, isPaused = false;
+    let spawnLoop = null, clockLoop = null, mode = "";
+
+    const container = document.getElementById("game-container");
+    const scoreTxt = document.getElementById("score-txt");
+    const comboTxt = document.getElementById("combo-txt");
+    const x2Txt = document.getElementById("x2-txt");
+    const timerBox = document.getElementById("timer-box");
+    const timerTxt = document.getElementById("timer-txt");
+
+    function changeView(id) {
+      document.getElementById("menu-screen").classList.add("hidden");
+      document.getElementById("time-screen").classList.add("hidden");
+      document.getElementById("pause-screen").classList.add("hidden");
+      document.getElementById("gameover-screen").classList.add("hidden");
+      document.getElementById("game-view").classList.add("hidden");
+      document.getElementById(id).classList.remove("hidden");
+    }
+
+    function showTimeMenu() { changeView("time-screen"); }
+    function backToMenu() { changeView("menu-screen"); }
+
+    function startEndless() {
+      mode = "endless";
+      timerBox.classList.add("hidden");
+      setupGame();
+    }
+
+    function startTimer(min) {
+      mode = "timer";
+      timeLeft = min * 60;
+      timerBox.classList.remove("hidden");
+      drawTime();
+      setupGame();
+
+      if(clockLoop) clearInterval(clockLoop);
+      clockLoop = setInterval(() => {
+        if(!isPaused) {
+          timeLeft--;
+          drawTime();
+          if(timeLeft <= 0) endGame();
+        }
+      }, 1000);
+    }
+
+    function setupGame() {
+      score = 0; combo = 0; isPaused = false;
+      scoreTxt.innerText = "0"; comboTxt.innerText = "0";
+      x2Txt.style.display = "none";
+      container.innerHTML = "";
+      changeView("game-view");
+
+      if(spawnLoop) clearInterval(spawnLoop);
+      spawnLoop = setInterval(spawnTarget, 600);
+    }
+
+    function drawTime() {
+      let m = Math.floor(timeLeft / 60).toString().padStart(2, '0');
+      let s = (timeLeft % 60).toString().padStart(2, '0');
+      timerTxt.innerText = m + ":" + s;
+    }
+
+    function spawnTarget() {
+      if(isPaused) return;
+      const t = document.createElement("div");
+      const isGold = Math.random() < 0.3;
+      let pts = isGold ? 150 : 50;
+
+      t.classList.add("target", isGold ? "target-gold" : "target-red");
+      t.style.left = Math.random() * (window.innerWidth - 60) + "px";
+
+      t.addEventListener("mousedown", (e) => {
+        e.stopPropagation();
+        if(isPaused) return;
+        combo++;
+        comboTxt.innerText = combo;
+        let mult = (combo >= 10) ? 2 : 1;
+        x2Txt.style.display = (combo >= 10) ? "inline" : "none";
+        score += pts * mult;
+        scoreTxt.innerText = score;
+        t.remove();
+      });
+
+      t.addEventListener("animationend", () => {
+        t.remove();
+        if(!isPaused) resetCombo();
+      });
+      container.appendChild(t);
+    }
+
+    function clickMiss(e) {
+      if(e.target === container && !isPaused) resetCombo();
+    }
+
+    function resetCombo() {
+      combo = 0; comboTxt.innerText = "0"; x2Txt.style.display = "none";
+    }
+
+    function pauseGame() {
+      isPaused = true;
+      document.querySelectorAll(".target").forEach(t => t.style.animationPlayState = "paused");
+      document.getElementById("pause-screen").classList.remove("hidden");
+    }
+
+    function resumeGame() {
+      isPaused = false;
+      document.querySelectorAll(".target").forEach(t => t.style.animationPlayState = "running");
+      document.getElementById("pause-screen").classList.add("hidden");
+    }
+
+    function endGame() {
+      clearInterval(spawnLoop); clearInterval(clockLoop);
+      document.getElementById("final-score").innerText = "คะแนนของคุณ: " + score;
+      changeView("gameover-screen");
+    }
+
+    function exitGame() {
+      clearInterval(spawnLoop); clearInterval(clockLoop);
+      container.innerHTML = "";
+      changeView("menu-screen");
+    }
+  </script>
+</body>
+</html>
+
